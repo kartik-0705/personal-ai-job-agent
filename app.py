@@ -1,7 +1,7 @@
 
 import streamlit as st
 from src.job_agent.database import save_jobs, get_saved_jobs
-
+from src.job_agent.resume_matcher import match_resume_to_job
 from src.job_agent.discovery import (
     SOURCE_DOMAINS,
     JobDiscoveryError,
@@ -292,3 +292,97 @@ if saved_jobs:
     )
 else:
     st.info("No jobs have been saved yet.")
+
+
+st.divider()
+st.header("AI Resume-to-Job Matching")
+
+st.write(
+    "Compare your resume with a job description to identify "
+    "recognized matching skills and potential skill gaps."
+)
+
+with st.form("resume_matching_form"):
+    resume_text = st.text_area(
+        "Paste your resume text",
+        height=220,
+        placeholder=(
+            "Paste your resume here, including your skills, "
+            "projects, and work experience."
+        ),
+    )
+
+    job_description = st.text_area(
+        "Paste the job description",
+        height=220,
+        placeholder=(
+            "Paste the complete job description here, "
+            "including its required skills."
+        ),
+    )
+
+    analyze_resume = st.form_submit_button(
+        "Analyze Resume Match",
+        type="primary",
+    )
+
+if analyze_resume:
+    try:
+        result = match_resume_to_job(
+            resume_text=resume_text,
+            job_description=job_description,
+        )
+
+        if not result["job_skills_found"]:
+            st.warning(
+                "No recognized skills were found in the job "
+                "description. Try pasting a more detailed description."
+            )
+        else:
+            st.subheader("Matching Results")
+
+            st.metric(
+                "Recognized Skills Match",
+                f'{result["match_score"]}%',
+            )
+
+            st.caption(
+                "This is a keyword-based score, not a prediction "
+                "of hiring success or a measure of proficiency."
+            )
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown("**Matching skills**")
+                if result["matched_skills"]:
+                    for skill in result["matched_skills"]:
+                        st.write(f"✅ {skill}")
+                else:
+                    st.info("No matching skills identified.")
+
+            with col2:
+                st.markdown("**Potential skill gaps**")
+                if result["missing_skills"]:
+                    for skill in result["missing_skills"]:
+                        st.write(f"📌 {skill}")
+                else:
+                    st.success(
+                        "All recognized job-description skills "
+                        "were found in the resume text."
+                    )
+
+            with st.expander("View all recognized skills"):
+                st.write("**Skills found in resume**")
+                st.write(
+                    ", ".join(result["resume_skills"]) or "None"
+                )
+
+                st.write("**Skills found in job description**")
+                st.write(
+                    ", ".join(result["job_skills"]) or "None"
+                )
+
+    except (TypeError, ValueError) as exc:
+        st.error(str(exc))
+
