@@ -1,6 +1,7 @@
 
 import streamlit as st
 from src.job_agent.database import save_jobs, get_saved_jobs
+from src.job_agent.document_reader import extract_text_from_file
 from src.job_agent.resume_matcher import match_resume_to_job
 from src.job_agent.discovery import (
     SOURCE_DOMAINS,
@@ -297,37 +298,88 @@ else:
 st.divider()
 st.header("AI Resume-to-Job Matching")
 
+
+# ---------------------------------------------------------
+# Resume-to-Job Matching with File Uploads
+# ---------------------------------------------------------
+
+st.divider()
+st.header("📄 AI Resume-to-Job Matching")
 st.write(
-    "Compare your resume with a job description to identify "
-    "recognized matching skills and potential skill gaps."
+    "Upload a resume and a job description, or paste their text, "
+    "to identify matching skills and potential skill gaps."
 )
 
-with st.form("resume_matching_form"):
-    resume_text = st.text_area(
-        "Paste your resume text",
-        height=220,
-        placeholder=(
-            "Paste your resume here, including your skills, "
-            "projects, and work experience."
-        ),
+with st.container(border=True):
+    st.subheader("Your documents")
+
+    resume_tab, resume_paste_tab = st.tabs(
+        ["📤 Upload Resume", "✍️ Paste Resume"]
     )
 
-    job_description = st.text_area(
-        "Paste the job description",
-        height=220,
-        placeholder=(
-            "Paste the complete job description here, "
-            "including its required skills."
-        ),
+    with resume_tab:
+        resume_file = st.file_uploader(
+            "Choose your resume",
+            type=["pdf", "docx", "txt"],
+            max_upload_size=5,
+            key="resume_upload",
+        )
+
+    with resume_paste_tab:
+        resume_manual = st.text_area(
+            "Resume text",
+            height=180,
+            placeholder="Paste your resume here...",
+            key="resume_manual",
+        )
+
+    st.divider()
+
+    jd_tab, jd_paste_tab = st.tabs(
+        ["📄 Upload Job Description", "✍️ Paste Job Description"]
     )
 
-    analyze_resume = st.form_submit_button(
-        "Analyze Resume Match",
+    with jd_tab:
+        jd_file = st.file_uploader(
+            "Choose a job description",
+            type=["pdf", "docx", "txt"],
+            max_upload_size=5,
+            key="jd_upload",
+        )
+
+    with jd_paste_tab:
+        jd_manual = st.text_area(
+            "Job description text",
+            height=180,
+            placeholder="Paste the complete job description here...",
+            key="jd_manual",
+        )
+
+    st.caption(
+        "Supported formats: PDF, DOCX and TXT. Maximum 5 MB per file. "
+        "Pasted text takes priority if both options are supplied."
+    )
+
+    analyze = st.button(
+        "✨ Analyze Resume Match",
         type="primary",
+        use_container_width=True,
+        key="analyze_uploaded_resume",
     )
 
-if analyze_resume:
+
+def get_document_text(uploaded_file, pasted_text):
+    if pasted_text and pasted_text.strip():
+        return pasted_text.strip()
+
+    return extract_text_from_file(uploaded_file)
+
+
+if analyze:
     try:
+        resume_text = get_document_text(resume_file, resume_manual)
+        job_description = get_document_text(jd_file, jd_manual)
+
         result = match_resume_to_job(
             resume_text=resume_text,
             job_description=job_description,
@@ -335,54 +387,64 @@ if analyze_resume:
 
         if not result["job_skills_found"]:
             st.warning(
-                "No recognized skills were found in the job "
-                "description. Try pasting a more detailed description."
+                "No recognized skills were found in the job description. "
+                "Try a more detailed job description."
             )
         else:
-            st.subheader("Matching Results")
+            st.subheader("Your matching results")
 
-            st.metric(
-                "Recognized Skills Match",
-                f'{result["match_score"]}%',
-            )
+            score = result["match_score"]
+            matched = result["matched_skills"]
+            missing = result["missing_skills"]
+
+            metric1, metric2, metric3 = st.columns(3)
+
+            metric1.metric("Skill Match", f"{score}%")
+            metric2.metric("Matching Skills", len(matched))
+            metric3.metric("Potential Skill Gaps", len(missing))
+
+            st.progress(score / 100)
 
             st.caption(
-                "This is a keyword-based score, not a prediction "
-                "of hiring success or a measure of proficiency."
+                "This score measures recognized keyword overlap. "
+                "It is not a hiring prediction or a measure of proficiency."
             )
 
-            col1, col2 = st.columns(2)
+            left, right = st.columns(2)
 
-            with col1:
-                st.markdown("**Matching skills**")
-                if result["matched_skills"]:
-                    for skill in result["matched_skills"]:
-                        st.write(f"✅ {skill}")
-                else:
-                    st.info("No matching skills identified.")
+            with left:
+                with st.container(border=True):
+                    st.markdown("#### ✅ Matching Skills")
 
-            with col2:
-                st.markdown("**Potential skill gaps**")
-                if result["missing_skills"]:
-                    for skill in result["missing_skills"]:
-                        st.write(f"📌 {skill}")
-                else:
-                    st.success(
-                        "All recognized job-description skills "
-                        "were found in the resume text."
-                    )
+                    if matched:
+                        for skill in matched:
+                            st.write(f"✓ {skill}")
+                    else:
+                        st.info("No matching skills identified.")
 
-            with st.expander("View all recognized skills"):
-                st.write("**Skills found in resume**")
+            with right:
+                with st.container(border=True):
+                    st.markdown("#### 🎯 Potential Skill Gaps")
+
+                    if missing:
+                        for skill in missing:
+                            st.write(f"• {skill}")
+                    else:
+                        st.success(
+                            "No gaps among the recognized job skills."
+                        )
+
+            with st.expander("View detected skills"):
+                st.markdown("**Resume skills**")
                 st.write(
-                    ", ".join(result["resume_skills"]) or "None"
+                    ", ".join(result["resume_skills"]) or "None detected"
                 )
 
-                st.write("**Skills found in job description**")
+                st.markdown("**Job description skills**")
                 st.write(
-                    ", ".join(result["job_skills"]) or "None"
+                    ", ".join(result["job_skills"]) or "None detected"
                 )
 
-    except (TypeError, ValueError) as exc:
+    except (ValueError, TypeError) as exc:
         st.error(str(exc))
 
